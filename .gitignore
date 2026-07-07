@@ -1,0 +1,14 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+*.log
+
+frontend/node_modules/
+frontend/dist/
+frontend/artifacts/
+frontend/*.tsbuildinfo
+
+runs/**/outputs/*.csv
+数据集/*.csv

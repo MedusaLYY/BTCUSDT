@@ -1,0 +1,26 @@
+[project]
+name = "btc-short-term-predictor"
+version = "0.1.0"
+description = "BTCUSDT short-term upside prediction research pipeline"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "joblib>=1.4",
+    "lightgbm>=4.5",
+    "matplotlib>=3.9",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "pyyaml>=6.0",
+    "scikit-learn>=1.5",
+    "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

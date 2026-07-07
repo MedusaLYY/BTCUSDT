@@ -1,0 +1,44 @@
+{
+  "model": {
+    "total_signals": 2,
+    "average_signals_per_day": 0.018274111675126905,
+    "win_rate": 0.5,
+    "precision_on_triggered_signals": 0.0,
+    "average_future_max_return": 0.0018845252626886744,
+    "average_future_min_return": -0.0024970203109236366,
+    "round_trip_cost": 0.0024000000000000002,
+    "estimated_return_after_costs": -0.0010309494746226517,
+    "average_estimated_return_after_costs": -0.0005154747373113258,
+    "max_drawdown": -0.0011016509130277186,
+    "profit_factor": 0.06417771507200459
+  },
+  "random_signal_baseline": {
+    "total_signals": 2,
+    "average_signals_per_day": 0.018274111675126905,
+    "win_rate": 0.0,
+    "precision_on_triggered_signals": 0.0,
+    "average_future_max_return": 0.0007541336378112939,
+    "average_future_min_return": -0.0066935018087846965,
+    "round_trip_cost": 0.0024000000000000002,
+    "estimated_return_after_costs": -0.0032917327243774126,
+    "average_estimated_return_after_costs": -0.0016458663621887063,
+    "max_drawdown": -0.0019256290165574619,
+    "profit_factor": 0.0
+  },
+  "rule_only_baseline": {
+    "total_signals": 4563,
+    "average_signals_per_day": 41.69238578680203,
+    "win_rate": 0.2976112206881438,
+    "precision_on_triggered_signals": 0.17466579005040545,
+    "average_future_max_return": 0.0022132152361642753,
+    "average_future_min_return": -0.0021585083723433466,
+    "round_trip_cost": 0.0024000000000000002,
+    "estimated_return_after_costs": -0.8522988773824112,
+    "average_estimated_return_after_costs": -0.00018678476383572455,
+    "max_drawdown": -0.7343799869069112,
+    "profit_factor": 0.8200628685391194
+  },
+  "buy_and_hold_reference": {
+    "return": -0.11651468304050872
+  }
+}
