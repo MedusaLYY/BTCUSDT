@@ -14,7 +14,7 @@ def train_return_regressor(
     params: dict[str, Any],
     random_seed: int,
 ) -> LGBMRegressor:
-    """Train the future maximum return regressor on chronological data."""
+    """Train the 30-minute future maximum return regressor on chronological data."""
     model_params = dict(params)
     model_params.setdefault("random_state", random_seed)
     model_params.setdefault("n_jobs", -1)
@@ -22,8 +22,8 @@ def train_return_regressor(
     model = LGBMRegressor(**model_params)
     model.fit(
         train[feature_columns],
-        train["future_max_return"],
-        eval_set=[(valid[feature_columns], valid["future_max_return"])],
+        train["future_max_return_30m"],
+        eval_set=[(valid[feature_columns], valid["future_max_return_30m"])],
         eval_metric="l2",
         callbacks=[
             lgb.early_stopping(stopping_rounds=50, verbose=False),

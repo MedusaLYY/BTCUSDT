@@ -9,8 +9,14 @@ def backtest_triggered_signals(
     fee_rate_per_side: float,
     slippage_rate_per_side: float,
 ) -> dict[str, float | int | None]:
-    """Evaluate BUY rows using future-window returns and round-trip costs."""
-    required = {"signal", "future_max_return", "future_min_return", "buy_label"}
+    """Evaluate BUY rows using next-open research returns and round-trip costs."""
+    required = {
+        "signal",
+        "future_max_return_30m_from_next_open",
+        "future_min_return_30m_from_next_open",
+        "future_close_return_30m_from_next_open",
+        "y_buy",
+    }
     missing = sorted(required - set(df.columns))
     if missing:
         raise ValueError(f"missing required columns for backtest: {missing}")
@@ -25,25 +31,38 @@ def backtest_triggered_signals(
             "precision_on_triggered_signals": None,
             "average_future_max_return": None,
             "average_future_min_return": None,
+            "average_future_close_return": None,
             "round_trip_cost": float(round_trip_cost),
             "estimated_return_after_costs": 0.0,
             "average_estimated_return_after_costs": None,
             "max_drawdown": 0.0,
+            "max_consecutive_losses": 0,
             "profit_factor": None,
         }
 
-    net_returns = triggered["future_max_return"].astype(float) - round_trip_cost
+    net_returns = (
+        triggered["future_close_return_30m_from_next_open"].astype(float)
+        - round_trip_cost
+    )
     return {
         "total_signals": int(len(triggered)),
         "average_signals_per_day": _signals_per_day(df, len(triggered)),
         "win_rate": float((net_returns > 0).mean()),
-        "precision_on_triggered_signals": float(triggered["buy_label"].mean()),
-        "average_future_max_return": float(triggered["future_max_return"].mean()),
-        "average_future_min_return": float(triggered["future_min_return"].mean()),
+        "precision_on_triggered_signals": float(triggered["y_buy"].mean()),
+        "average_future_max_return": float(
+            triggered["future_max_return_30m_from_next_open"].mean()
+        ),
+        "average_future_min_return": float(
+            triggered["future_min_return_30m_from_next_open"].mean()
+        ),
+        "average_future_close_return": float(
+            triggered["future_close_return_30m_from_next_open"].mean()
+        ),
         "round_trip_cost": float(round_trip_cost),
         "estimated_return_after_costs": float(net_returns.sum()),
         "average_estimated_return_after_costs": float(net_returns.mean()),
         "max_drawdown": float(_max_drawdown(net_returns)),
+        "max_consecutive_losses": int(_max_consecutive_losses(net_returns)),
         "profit_factor": _profit_factor(net_returns),
     }
 
@@ -75,10 +94,10 @@ def make_random_baseline(
 
 
 def make_rule_baseline(df: pd.DataFrame) -> pd.DataFrame:
-    """Rule-only baseline from trend and volume filters."""
+    """Rule-only baseline from historical trend and volume-zscore filters."""
     baseline = df.copy()
     rule = (baseline["close"] > baseline["ma_20"]) & (
-        baseline["volume_ratio_20"] > 1.1
+        baseline["volume_zscore_20"] > 0
     )
     baseline["signal"] = np.where(rule, "BUY", "NO_BUY")
     return baseline
@@ -96,10 +115,24 @@ def _signals_per_day(frame: pd.DataFrame, signal_count: int) -> float:
 
 
 def _max_drawdown(returns: pd.Series) -> float:
+    if returns.empty:
+        return 0.0
     equity = (1 + returns).cumprod()
     peak = equity.cummax()
     drawdown = equity / peak - 1
     return float(drawdown.min())
+
+
+def _max_consecutive_losses(returns: pd.Series) -> int:
+    max_losses = 0
+    current_losses = 0
+    for value in returns:
+        if value < 0:
+            current_losses += 1
+            max_losses = max(max_losses, current_losses)
+        else:
+            current_losses = 0
+    return max_losses
 
 
 def _profit_factor(returns: pd.Series) -> float | None:

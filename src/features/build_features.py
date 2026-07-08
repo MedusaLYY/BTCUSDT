@@ -6,36 +6,49 @@ import pandas as pd
 
 FEATURE_COLUMNS = [
     "return_1",
+    "return_2",
     "return_3",
     "return_6",
     "return_12",
     "return_24",
+    "return_48",
     "ma_5",
     "ma_10",
     "ma_20",
     "ma_60",
-    "close_ma20_ratio",
-    "close_ma60_ratio",
     "rolling_std_12",
     "rolling_std_24",
-    "atr_14",
+    "rolling_std_48",
     "high_low_range",
-    "volume_ratio_20",
-    "quote_volume_ratio_20",
-    "trade_count_ratio_20",
+    "volume_zscore_20",
+    "trade_count_change_1",
     "body_ratio",
     "upper_shadow_ratio",
     "lower_shadow_ratio",
-    "rsi_14",
-    "hour",
-    "day_of_week",
 ]
 
-TARGET_COLUMNS = {"future_max_return", "future_min_return", "buy_label"}
+FORBIDDEN_FEATURE_COLUMNS = {
+    "future_max_return",
+    "future_min_return",
+    "buy_label",
+    "future_max_return_30m",
+    "future_min_return_30m",
+    "future_close_return_30m",
+    "future_max_return_30m_from_next_open",
+    "future_min_return_30m_from_next_open",
+    "future_close_return_30m_from_next_open",
+    "y_buy",
+    "signal",
+    "reason",
+    "buy_probability",
+    "predicted_max_return",
+    "pred_future_max_return",
+    "pred_high_price",
+}
 
 
 def build_feature_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    """Build historical-only features and return the fixed feature order."""
+    """Build current-and-historical-only features and return fixed feature order."""
     required = {
         "open_time",
         "open",
@@ -43,50 +56,36 @@ def build_feature_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
         "low",
         "close",
         "volume",
-        "quote_volume",
         "trade_count",
     }
     missing = sorted(required - set(df.columns))
     if missing:
         raise ValueError(f"missing required columns for features: {missing}")
 
-    featured = df.copy().reset_index(drop=True)
-    close = featured["close"]
-    high = featured["high"]
-    low = featured["low"]
-    open_ = featured["open"]
+    featured = df.copy().sort_values("open_time").reset_index(drop=True)
+    close = featured["close"].astype(float)
+    high = featured["high"].astype(float)
+    low = featured["low"].astype(float)
+    open_ = featured["open"].astype(float)
 
-    for period in [1, 3, 6, 12, 24]:
-        featured[f"return_{period}"] = close.pct_change(period)
+    for period in [1, 2, 3, 6, 12, 24, 48]:
+        featured[f"return_{period}"] = close.pct_change(periods=period, fill_method=None)
 
     for window in [5, 10, 20, 60]:
         featured[f"ma_{window}"] = close.rolling(window=window).mean()
 
-    featured["close_ma20_ratio"] = _safe_div(close, featured["ma_20"]) - 1
-    featured["close_ma60_ratio"] = _safe_div(close, featured["ma_60"]) - 1
-    featured["rolling_std_12"] = featured["return_1"].rolling(window=12).std()
-    featured["rolling_std_24"] = featured["return_1"].rolling(window=24).std()
+    returns_1 = featured["return_1"]
+    for window in [12, 24, 48]:
+        featured[f"rolling_std_{window}"] = returns_1.rolling(window=window).std()
 
-    prev_close = close.shift(1)
-    true_range = pd.concat(
-        [
-            high - low,
-            (high - prev_close).abs(),
-            (low - prev_close).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-    featured["atr_14"] = true_range.rolling(window=14).mean()
     featured["high_low_range"] = _safe_div(high - low, close)
 
-    featured["volume_ratio_20"] = _safe_div(
-        featured["volume"], featured["volume"].rolling(window=20).mean()
-    )
-    featured["quote_volume_ratio_20"] = _safe_div(
-        featured["quote_volume"], featured["quote_volume"].rolling(window=20).mean()
-    )
-    featured["trade_count_ratio_20"] = _safe_div(
-        featured["trade_count"], featured["trade_count"].rolling(window=20).mean()
+    volume_mean_20 = featured["volume"].rolling(window=20).mean()
+    volume_std_20 = featured["volume"].rolling(window=20).std()
+    featured["volume_zscore_20"] = _safe_div(featured["volume"] - volume_mean_20, volume_std_20)
+    featured["trade_count_change_1"] = featured["trade_count"].pct_change(
+        periods=1,
+        fill_method=None,
     )
 
     candle_range = (high - low).replace(0, np.nan)
@@ -95,13 +94,9 @@ def build_feature_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     featured["body_ratio"] = (close - open_).abs() / candle_range
     featured["upper_shadow_ratio"] = (high - upper_body) / candle_range
     featured["lower_shadow_ratio"] = (lower_body - low) / candle_range
-    featured["rsi_14"] = _rsi(close, window=14)
-
-    featured["hour"] = featured["open_time"].dt.hour
-    featured["day_of_week"] = featured["open_time"].dt.dayofweek
 
     feature_columns = list(FEATURE_COLUMNS)
-    forbidden = TARGET_COLUMNS.intersection(feature_columns)
+    forbidden = FORBIDDEN_FEATURE_COLUMNS.intersection(feature_columns)
     if forbidden:
         raise ValueError(f"target columns leaked into features: {sorted(forbidden)}")
 
@@ -112,12 +107,3 @@ def build_feature_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
 
 def _safe_div(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
     return numerator / denominator.replace(0, np.nan)
-
-
-def _rsi(close: pd.Series, window: int) -> pd.Series:
-    delta = close.diff()
-    gain = delta.clip(lower=0).rolling(window=window).mean()
-    loss = (-delta.clip(upper=0)).rolling(window=window).mean()
-    rs = gain / loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(100)

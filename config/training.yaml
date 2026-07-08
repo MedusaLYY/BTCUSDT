@@ -5,8 +5,7 @@ random_seed: 42
 
 label:
   horizon: 6
-  upside_threshold: 0.003
-  drawdown_threshold: -0.002
+  upside_threshold: 0.002
 
 split:
   train_ratio: 0.70
@@ -19,8 +18,12 @@ cost:
   slippage_rate_per_side: 0.0002
 
 thresholds:
-  watch: 0.55
-  buy_candidates: [0.50, 0.55, 0.60, 0.62, 0.65, 0.70]
+  buy_probability: 0.62
+  buy_return: 0.0025
+  watch_probability: 0.55
+  watch_return: 0.0015
+  sweep_buy_probabilities: [0.50, 0.55, 0.60, 0.62, 0.65, 0.70]
+  sweep_predicted_returns: [0.0010, 0.0015, 0.0020, 0.0025, 0.0030]
   min_validation_signals: 50
 
 classifier:

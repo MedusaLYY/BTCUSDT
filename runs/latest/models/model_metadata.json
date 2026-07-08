@@ -1,0 +1,31 @@
+{
+  "symbol": "BTCUSDT",
+  "interval": "5m",
+  "horizon_bars": 6,
+  "upside_threshold": 0.002,
+  "signal_thresholds": {
+    "buy_probability": 0.62,
+    "buy_return": 0.0025,
+    "watch_probability": 0.55,
+    "watch_return": 0.0015
+  },
+  "split": {
+    "train": {
+      "rows": 147123,
+      "time_start": "2024-07-06 11:20:00",
+      "time_end": "2025-11-29 07:30:00"
+    },
+    "valid": {
+      "rows": 31520,
+      "time_start": "2025-11-29 08:05:00",
+      "time_end": "2026-03-18 18:40:00"
+    },
+    "test": {
+      "rows": 31521,
+      "time_start": "2026-03-18 19:15:00",
+      "time_end": "2026-07-06 05:55:00"
+    }
+  },
+  "feature_count": 20,
+  "model_version": "lightgbm_dual_v1"
+}

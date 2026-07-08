@@ -10,13 +10,12 @@
 ## Label Definition
 
 - Horizon: 6 bars
-- Upside threshold: 0.003
-- Drawdown threshold: -0.002
-- Positive rate: 18.1483%
+- Upside threshold: 0.002
+- Positive rate: 39.0377%
 
 ## Feature List
 
-- Feature count: 24
+- Feature count: 20
 
 ## Time Split
 
@@ -26,43 +25,44 @@
 
 ## Validation Metrics
 
-- ROC-AUC: 0.6849232266225195
-- PR-AUC: 0.2920179989151467
-- Selected threshold: 0.65
+- AUC: 0.7473676391571272
+- Average Precision: 0.6490925374016413
+- Brier Score: 0.21085282146500042
+- BUY probability threshold: 0.62
+- BUY return threshold: 0.0025
 
 ## Test Backtest
 
-- Total BUY signals: 2
-- Precision on triggered signals: 0.0
-- Average future max return: 0.0018845252626886744
-- Average future min return: -0.0024970203109236366
-- Estimated return after costs: -0.0010309494746226517
-- Max drawdown: -0.0011016509130277186
+- Total BUY signals: 7000
+- Precision on triggered signals: 0.5848571428571429
+- Average future max return: 0.003406423310050747
+- Average future min return: -0.0033399682713373628
+- Average future close return: 0.00010112566299649465
+- Average return after costs: -0.0022988743370035048
+- Max consecutive losses: 72
+- Max drawdown: -0.9999999055204263
 
 ## Feature Importance
 
-- hour: 306
-- atr_14: 299
-- day_of_week: 202
-- ma_20: 191
-- ma_60: 187
-- rolling_std_24: 187
-- ma_5: 186
-- close_ma60_ratio: 181
-- ma_10: 169
-- rolling_std_12: 125
-- high_low_range: 120
-- return_24: 98
-- close_ma20_ratio: 87
-- return_6: 55
-- return_12: 47
+- rolling_std_48: 462
+- high_low_range: 383
+- ma_60: 300
+- rolling_std_12: 300
+- rolling_std_24: 299
+- return_24: 262
+- ma_5: 249
+- return_12: 232
+- return_48: 228
+- return_6: 220
+- ma_10: 172
+- ma_20: 146
+- body_ratio: 129
+- return_3: 102
+- return_2: 90
 
 ## Risks and Limitations
 
 - This report is factual research output, not financial advice.
 - Test data was used only for final evaluation.
+- Threshold sweep reports must not be used to tune default test thresholds.
 - Fees and slippage are assumptions and may differ from live execution.
-
-## Paper Trading Readiness
-
-- Ready for paper trading: no

@@ -27,12 +27,15 @@ from labels.build_labels import add_future_labels, label_distribution_by_month
 from models.train_regressor import train_return_regressor
 from signals.signal_engine import assign_signals
 from utils.metrics import (
+    build_threshold_sweep_report,
     classifier_probability_metrics,
     evaluate_thresholds,
     regression_metrics,
-    select_high_precision_threshold,
 )
 from utils.time_split import time_based_split
+
+
+MODEL_VERSION = "lightgbm_dual_v1"
 
 
 def run_training(config_path: str | Path) -> dict[str, Any]:
@@ -57,7 +60,6 @@ def run_training(config_path: str | Path) -> dict[str, Any]:
         raw,
         horizon=int(label_cfg["horizon"]),
         upside_threshold=float(label_cfg["upside_threshold"]),
-        drawdown_threshold=float(label_cfg["drawdown_threshold"]),
     )
     featured, feature_columns = build_feature_frame(labeled)
 
@@ -67,9 +69,9 @@ def run_training(config_path: str | Path) -> dict[str, Any]:
         train_ratio=float(split_cfg["train_ratio"]),
         valid_ratio=float(split_cfg["valid_ratio"]),
         test_ratio=float(split_cfg["test_ratio"]),
-        gap=int(split_cfg["gap"]),
+        gap=int(split_cfg.get("gap", 0)),
     )
-    _require_two_classes(split.train["buy_label"], "train")
+    _require_two_classes(split.train["y_buy"], "train")
 
     classifier = train_buy_classifier(
         split.train,
@@ -101,25 +103,20 @@ def run_training(config_path: str | Path) -> dict[str, Any]:
         regressor.predict(split.test[feature_columns]), index=split.test.index
     )
 
-    threshold_cfg = config["thresholds"]
-    threshold_rows = evaluate_thresholds(
-        split.valid["buy_label"],
+    signal_thresholds = _signal_thresholds(config)
+    valid_predictions = _build_prediction_frame(
+        split.valid,
         valid_prob,
-        split.valid["future_max_return"],
-        split.valid["future_min_return"],
-        thresholds=threshold_cfg["buy_candidates"],
+        valid_reg_pred,
+        signal_thresholds,
+        symbol=str(config.get("symbol", "BTCUSDT")),
+        interval=str(config.get("interval", "5m")),
     )
-    selected_threshold = select_high_precision_threshold(
-        threshold_rows,
-        min_signals=int(threshold_cfg.get("min_validation_signals", 50)),
-    )
-
     test_predictions = _build_prediction_frame(
         split.test,
         test_prob,
         test_reg_pred,
-        selected_threshold,
-        watch_threshold=float(threshold_cfg.get("watch", 0.55)),
+        signal_thresholds,
         symbol=str(config.get("symbol", "BTCUSDT")),
         interval=str(config.get("interval", "5m")),
     )
@@ -129,6 +126,16 @@ def run_training(config_path: str | Path) -> dict[str, Any]:
     cost_cfg = config["cost"]
     fee_rate = float(cost_cfg["fee_rate_per_side"])
     slippage_rate = float(cost_cfg["slippage_rate_per_side"])
+    round_trip_cost = 2 * (fee_rate + slippage_rate)
+    threshold_sweep = _build_threshold_sweep(
+        valid_predictions,
+        test_predictions,
+        config=config,
+        round_trip_cost=round_trip_cost,
+    )
+    threshold_sweep_path = reports_dir / "threshold_sweep_report.csv"
+    threshold_sweep.to_csv(threshold_sweep_path, index=False)
+
     model_backtest = backtest_triggered_signals(
         test_predictions,
         fee_rate_per_side=fee_rate,
@@ -158,10 +165,26 @@ def run_training(config_path: str | Path) -> dict[str, Any]:
     classifier_path = models_dir / "buy_classifier.txt"
     regressor_path = models_dir / "return_regressor.txt"
     feature_columns_path = models_dir / "feature_columns.json"
+    metadata_path = models_dir / "model_metadata.json"
     _save_booster_model(classifier.booster_, classifier_path)
     _save_booster_model(regressor.booster_, regressor_path)
     _write_json(feature_columns_path, feature_columns)
+    metadata = _build_model_metadata(
+        config=config,
+        split=split,
+        feature_columns=feature_columns,
+        signal_thresholds=signal_thresholds,
+    )
+    _write_json(metadata_path, metadata)
 
+    probability_thresholds = _probability_thresholds(config)
+    threshold_rows = evaluate_thresholds(
+        split.valid["y_buy"],
+        valid_prob,
+        split.valid["future_max_return_30m"],
+        split.valid["future_min_return_30m"],
+        thresholds=probability_thresholds,
+    )
     metrics = _build_metrics_payload(
         config=config,
         dataset_path=dataset_path,
@@ -174,7 +197,7 @@ def run_training(config_path: str | Path) -> dict[str, Any]:
         valid_prob=valid_prob,
         test_prob=test_prob,
         threshold_rows=threshold_rows,
-        selected_threshold=selected_threshold,
+        signal_thresholds=signal_thresholds,
         valid_reg_pred=valid_reg_pred,
         test_reg_pred=test_reg_pred,
         backtest_report=backtest_report,
@@ -182,7 +205,9 @@ def run_training(config_path: str | Path) -> dict[str, Any]:
             "classifier": classifier_path,
             "regressor": regressor_path,
             "feature_columns": feature_columns_path,
+            "model_metadata": metadata_path,
             "test_predictions": test_predictions_path,
+            "threshold_sweep_report": threshold_sweep_path,
         },
     )
     metrics_path = reports_dir / "training_metrics.json"
@@ -193,15 +218,18 @@ def run_training(config_path: str | Path) -> dict[str, Any]:
     report_path.write_text(_render_markdown_report(metrics), encoding="utf-8")
 
     return {
-        "selected_threshold": selected_threshold,
+        "signal_thresholds": signal_thresholds,
+        "selected_threshold": signal_thresholds["buy_probability"],
         "artifacts": {
             "classifier": str(classifier_path),
             "regressor": str(regressor_path),
             "feature_columns": str(feature_columns_path),
+            "model_metadata": str(metadata_path),
             "training_metrics": str(metrics_path),
             "backtest_report": str(backtest_path),
             "training_report": str(report_path),
             "test_predictions": str(test_predictions_path),
+            "threshold_sweep_report": str(threshold_sweep_path),
         },
     }
 
@@ -213,7 +241,7 @@ def train_buy_classifier(
     params: dict[str, Any],
     random_seed: int,
 ) -> LGBMClassifier:
-    """Train buy-label classifier without shuffling chronological data."""
+    """Train y-buy classifier without shuffling chronological data."""
     model_params = dict(params)
     model_params.setdefault("random_state", random_seed)
     model_params.setdefault("n_jobs", -1)
@@ -221,8 +249,8 @@ def train_buy_classifier(
     model = LGBMClassifier(**model_params)
     model.fit(
         train[feature_columns],
-        train["buy_label"],
-        eval_set=[(valid[feature_columns], valid["buy_label"])],
+        train["y_buy"],
+        eval_set=[(valid[feature_columns], valid["y_buy"])],
         eval_metric="binary_logloss",
         callbacks=[
             lgb.early_stopping(stopping_rounds=50, verbose=False),
@@ -236,8 +264,7 @@ def _build_prediction_frame(
     frame: pd.DataFrame,
     probabilities: pd.Series,
     predicted_returns: pd.Series,
-    selected_threshold: float,
-    watch_threshold: float,
+    signal_thresholds: dict[str, float],
     symbol: str,
     interval: str,
 ) -> pd.DataFrame:
@@ -246,14 +273,16 @@ def _build_prediction_frame(
     predictions["interval"] = interval
     predictions["current_price"] = predictions["close"]
     predictions["buy_probability"] = probabilities.to_numpy()
-    predictions["pred_future_max_return"] = predicted_returns.to_numpy()
+    predictions["predicted_max_return"] = predicted_returns.to_numpy()
     predictions["pred_high_price"] = predictions["close"] * (
-        1 + predictions["pred_future_max_return"]
+        1 + predictions["predicted_max_return"]
     )
     return assign_signals(
         predictions,
-        buy_threshold=selected_threshold,
-        watch_threshold=watch_threshold,
+        buy_probability_threshold=signal_thresholds["buy_probability"],
+        buy_return_threshold=signal_thresholds["buy_return"],
+        watch_probability_threshold=signal_thresholds["watch_probability"],
+        watch_return_threshold=signal_thresholds["watch_return"],
     )
 
 
@@ -269,18 +298,18 @@ def _build_metrics_payload(
     valid_prob: pd.Series,
     test_prob: pd.Series,
     threshold_rows: list[dict[str, object]],
-    selected_threshold: float,
+    signal_thresholds: dict[str, float],
     valid_reg_pred: pd.Series,
     test_reg_pred: pd.Series,
     backtest_report: dict[str, Any],
     artifacts: dict[str, Path],
 ) -> dict[str, Any]:
     test_threshold_rows = evaluate_thresholds(
-        split.test["buy_label"],
+        split.test["y_buy"],
         test_prob,
-        split.test["future_max_return"],
-        split.test["future_min_return"],
-        thresholds=[selected_threshold],
+        split.test["future_max_return_30m"],
+        split.test["future_min_return_30m"],
+        thresholds=[signal_thresholds["buy_probability"]],
     )
     return {
         "dataset": {
@@ -291,10 +320,11 @@ def _build_metrics_payload(
             "audit": audit,
         },
         "label": {
-            **config["label"],
+            "horizon": int(config["label"]["horizon"]),
+            "upside_threshold": float(config["label"]["upside_threshold"]),
             "labeled_rows": int(len(labeled)),
-            "positive_count": int(labeled["buy_label"].sum()),
-            "positive_rate": float(labeled["buy_label"].mean()),
+            "positive_count": int(labeled["y_buy"].sum()),
+            "positive_rate": float(labeled["y_buy"].mean()),
             "distribution_by_month": label_distribution_by_month(labeled),
         },
         "features": {
@@ -307,24 +337,29 @@ def _build_metrics_payload(
             "classifier": config["classifier"],
             "regressor": config["regressor"],
             "random_seed": int(config.get("random_seed", 42)),
+            "model_version": MODEL_VERSION,
         },
+        "signal_thresholds": signal_thresholds,
         "validation": {
             "probability_metrics": classifier_probability_metrics(
-                split.valid["buy_label"], valid_prob
+                split.valid["y_buy"],
+                valid_prob,
+                buy_probability_threshold=signal_thresholds["buy_probability"],
             ),
             "threshold_metrics": threshold_rows,
-            "selected_threshold": selected_threshold,
             "regression": regression_metrics(
-                split.valid["future_max_return"], valid_reg_pred
+                split.valid["future_max_return_30m"], valid_reg_pred
             ),
         },
         "test": {
             "probability_metrics": classifier_probability_metrics(
-                split.test["buy_label"], test_prob
+                split.test["y_buy"],
+                test_prob,
+                buy_probability_threshold=signal_thresholds["buy_probability"],
             ),
-            "threshold_metrics_at_selected_threshold": test_threshold_rows,
+            "threshold_metrics_at_buy_probability": test_threshold_rows,
             "regression": regression_metrics(
-                split.test["future_max_return"], test_reg_pred
+                split.test["future_max_return_30m"], test_reg_pred
             ),
             "backtest": backtest_report,
         },
@@ -333,12 +368,89 @@ def _build_metrics_payload(
         "artifacts": {name: str(path) for name, path in artifacts.items()},
         "limitations": [
             "This is a research pipeline, not financial advice.",
-            "The selected threshold is chosen on validation data only.",
-            "Test backtest results must not be used for tuning this run.",
+            "Default signal thresholds are fixed by configuration, not tuned on test data.",
+            "Threshold sweep reports are research outputs and must not tune test thresholds.",
             "Signals use future-window labels for evaluation, not guaranteed trade fills.",
         ],
-        "ready_for_paper_trading": _ready_for_paper_trading(backtest_report),
+        "ready_for_paper_trading": False,
     }
+
+
+def _build_threshold_sweep(
+    valid_predictions: pd.DataFrame,
+    test_predictions: pd.DataFrame,
+    config: dict[str, Any],
+    round_trip_cost: float,
+) -> pd.DataFrame:
+    probabilities = _probability_thresholds(config)
+    returns = _return_thresholds(config)
+    return pd.concat(
+        [
+            build_threshold_sweep_report(
+                valid_predictions,
+                dataset_name="validation",
+                probability_thresholds=probabilities,
+                return_thresholds=returns,
+                round_trip_cost=round_trip_cost,
+            ),
+            build_threshold_sweep_report(
+                test_predictions,
+                dataset_name="test_final_evaluation_only",
+                probability_thresholds=probabilities,
+                return_thresholds=returns,
+                round_trip_cost=round_trip_cost,
+            ),
+        ],
+        ignore_index=True,
+    )
+
+
+def _build_model_metadata(
+    config: dict[str, Any],
+    split,
+    feature_columns: list[str],
+    signal_thresholds: dict[str, float],
+) -> dict[str, Any]:
+    return {
+        "symbol": str(config.get("symbol", "BTCUSDT")),
+        "interval": str(config.get("interval", "5m")),
+        "horizon_bars": int(config["label"]["horizon"]),
+        "upside_threshold": float(config["label"]["upside_threshold"]),
+        "signal_thresholds": signal_thresholds,
+        "split": split.summary(),
+        "feature_count": len(feature_columns),
+        "model_version": MODEL_VERSION,
+    }
+
+
+def _signal_thresholds(config: dict[str, Any]) -> dict[str, float]:
+    thresholds = config.get("thresholds", {})
+    return {
+        "buy_probability": float(thresholds.get("buy_probability", 0.62)),
+        "buy_return": float(thresholds.get("buy_return", 0.0025)),
+        "watch_probability": float(
+            thresholds.get("watch_probability", thresholds.get("watch", 0.55))
+        ),
+        "watch_return": float(thresholds.get("watch_return", 0.0015)),
+    }
+
+
+def _probability_thresholds(config: dict[str, Any]) -> list[float]:
+    thresholds = config.get("thresholds", {})
+    values = thresholds.get(
+        "sweep_buy_probabilities",
+        thresholds.get("buy_candidates", [0.50, 0.55, 0.60, 0.62, 0.65, 0.70]),
+    )
+    return [float(value) for value in values]
+
+
+def _return_thresholds(config: dict[str, Any]) -> list[float]:
+    thresholds = config.get("thresholds", {})
+    values = thresholds.get(
+        "sweep_predicted_returns",
+        [0.0010, 0.0015, 0.0020, 0.0025, 0.0030],
+    )
+    return [float(value) for value in values]
 
 
 def _feature_importance(
@@ -351,21 +463,10 @@ def _feature_importance(
     ]
 
 
-def _ready_for_paper_trading(backtest_report: dict[str, Any]) -> bool:
-    model = backtest_report["model"]
-    return bool(
-        model["total_signals"]
-        and model["precision_on_triggered_signals"] is not None
-        and model["precision_on_triggered_signals"] >= 0.5
-        and model["estimated_return_after_costs"] > 0
-    )
-
-
 def _render_markdown_report(metrics: dict[str, Any]) -> str:
     validation = metrics["validation"]
     test = metrics["test"]
     model_backtest = test["backtest"]["model"]
-    ready = "yes" if metrics["ready_for_paper_trading"] else "no"
     top_features = "\n".join(
         f"- {row['feature']}: {row['importance']}"
         for row in metrics["feature_importance"][:15]
@@ -383,7 +484,6 @@ def _render_markdown_report(metrics: dict[str, Any]) -> str:
 
 - Horizon: {metrics['label']['horizon']} bars
 - Upside threshold: {metrics['label']['upside_threshold']}
-- Drawdown threshold: {metrics['label']['drawdown_threshold']}
 - Positive rate: {metrics['label']['positive_rate']:.4%}
 
 ## Feature List
@@ -398,9 +498,11 @@ def _render_markdown_report(metrics: dict[str, Any]) -> str:
 
 ## Validation Metrics
 
-- ROC-AUC: {validation['probability_metrics']['roc_auc']}
-- PR-AUC: {validation['probability_metrics']['pr_auc']}
-- Selected threshold: {validation['selected_threshold']}
+- AUC: {validation['probability_metrics']['auc']}
+- Average Precision: {validation['probability_metrics']['average_precision']}
+- Brier Score: {validation['probability_metrics']['brier_score']}
+- BUY probability threshold: {metrics['signal_thresholds']['buy_probability']}
+- BUY return threshold: {metrics['signal_thresholds']['buy_return']}
 
 ## Test Backtest
 
@@ -408,7 +510,9 @@ def _render_markdown_report(metrics: dict[str, Any]) -> str:
 - Precision on triggered signals: {model_backtest['precision_on_triggered_signals']}
 - Average future max return: {model_backtest['average_future_max_return']}
 - Average future min return: {model_backtest['average_future_min_return']}
-- Estimated return after costs: {model_backtest['estimated_return_after_costs']}
+- Average future close return: {model_backtest['average_future_close_return']}
+- Average return after costs: {model_backtest['average_estimated_return_after_costs']}
+- Max consecutive losses: {model_backtest['max_consecutive_losses']}
 - Max drawdown: {model_backtest['max_drawdown']}
 
 ## Feature Importance
@@ -419,11 +523,8 @@ def _render_markdown_report(metrics: dict[str, Any]) -> str:
 
 - This report is factual research output, not financial advice.
 - Test data was used only for final evaluation.
+- Threshold sweep reports must not be used to tune default test thresholds.
 - Fees and slippage are assumptions and may differ from live execution.
-
-## Paper Trading Readiness
-
-- Ready for paper trading: {ready}
 """
 
 
@@ -445,7 +546,7 @@ def _resolve_path(path_value: str, root: Path) -> Path:
 
 def _require_two_classes(series: pd.Series, split_name: str) -> None:
     if series.nunique() < 2:
-        raise ValueError(f"{split_name} split must contain both buy_label classes")
+        raise ValueError(f"{split_name} split must contain both y_buy classes")
 
 
 def _runtime_versions() -> dict[str, str]:

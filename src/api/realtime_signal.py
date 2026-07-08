@@ -41,8 +41,7 @@ def build_latest_prediction_signal(
         feature_columns_path=MODEL_DIR / "feature_columns.json",
         frame=featured,
     )
-    threshold = _selected_threshold()
-    signaled = assign_signals(predicted.tail(1), buy_threshold=threshold)
+    signaled = assign_signals(predicted.tail(1), **_signal_thresholds())
     row = signaled.iloc[-1]
     reason = [item.strip() for item in str(row["reason"]).split(";") if item.strip()]
 
@@ -53,7 +52,7 @@ def build_latest_prediction_signal(
         "currentPrice": float(row["close"]),
         "signal": str(row["signal"]),
         "buyProbability": float(row["buy_probability"]),
-        "predReturn": float(row["pred_future_max_return"]),
+        "predReturn": float(row["predicted_max_return"]),
         "predHighPrice": float(row["pred_high_price"]),
         "reason": reason,
     }
@@ -65,8 +64,8 @@ def load_historical_signal_records(limit: int = 500) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
 
     for index, row in frame.iterrows():
-        actual_return = float(row["future_max_return"])
-        pred_return = float(row["pred_future_max_return"])
+        actual_return = float(row["future_max_return_30m"])
+        pred_return = float(row["predicted_max_return"])
         hit_status = "HIT" if actual_return >= pred_return * 0.72 else "MISS"
         records.append(
             {
@@ -108,7 +107,9 @@ def load_equity_curve() -> list[dict[str, Any]]:
     predictions = pd.read_csv(OUTPUT_DIR / "test_predictions.csv")
     predictions["date"] = pd.to_datetime(predictions["open_time"]).dt.strftime("%Y-%m-%d")
     buy_signals = predictions[predictions["signal"] == "BUY"].copy()
-    buy_signals["net_return"] = buy_signals["future_max_return"] - 0.0024
+    buy_signals["net_return"] = (
+        buy_signals["future_close_return_30m_from_next_open"] - 0.0024
+    )
     daily_returns = buy_signals.groupby("date")["net_return"].sum().to_dict()
     dates = sorted(predictions["date"].unique())
 
@@ -172,9 +173,23 @@ def _raw_klines_to_feature_input(raw_klines: list[list[Any]], closed_only: bool)
     return pd.DataFrame(rows)
 
 
-def _selected_threshold() -> float:
-    metrics = json.loads((REPORT_DIR / "training_metrics.json").read_text(encoding="utf-8"))
-    return float(metrics["validation"]["selected_threshold"])
+def _signal_thresholds() -> dict[str, float]:
+    metadata_path = MODEL_DIR / "model_metadata.json"
+    if metadata_path.exists():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        thresholds = metadata["signal_thresholds"]
+        return {
+            "buy_probability_threshold": float(thresholds["buy_probability"]),
+            "buy_return_threshold": float(thresholds["buy_return"]),
+            "watch_probability_threshold": float(thresholds["watch_probability"]),
+            "watch_return_threshold": float(thresholds["watch_return"]),
+        }
+    return {
+        "buy_probability_threshold": 0.62,
+        "buy_return_threshold": 0.0025,
+        "watch_probability_threshold": 0.55,
+        "watch_return_threshold": 0.0015,
+    }
 
 
 def _format_open_time(value: Any) -> str:

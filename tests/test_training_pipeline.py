@@ -42,7 +42,6 @@ def test_run_training_writes_expected_artifacts(tmp_path):
         "label": {
             "horizon": 6,
             "upside_threshold": 0.002,
-            "drawdown_threshold": -0.003,
         },
         "split": {
             "train_ratio": 0.7,
@@ -55,8 +54,12 @@ def test_run_training_writes_expected_artifacts(tmp_path):
             "slippage_rate_per_side": 0.0002,
         },
         "thresholds": {
-            "watch": 0.55,
-            "buy_candidates": [0.5, 0.6, 0.7],
+            "buy_probability": 0.62,
+            "buy_return": 0.0025,
+            "watch_probability": 0.55,
+            "watch_return": 0.0015,
+            "sweep_buy_probabilities": [0.55, 0.62],
+            "sweep_predicted_returns": [0.0015, 0.0025],
             "min_validation_signals": 1,
         },
         "classifier": {
@@ -85,16 +88,46 @@ def test_run_training_writes_expected_artifacts(tmp_path):
 
     result = run_training(config_path)
 
-    assert result["selected_threshold"] in [0.5, 0.6, 0.7]
+    assert result["signal_thresholds"]["buy_probability"] == 0.62
     assert (tmp_path / "models" / "buy_classifier.txt").exists()
     assert (tmp_path / "models" / "return_regressor.txt").exists()
     assert (tmp_path / "models" / "feature_columns.json").exists()
+    assert (tmp_path / "models" / "model_metadata.json").exists()
     assert (tmp_path / "reports" / "training_metrics.json").exists()
     assert (tmp_path / "reports" / "backtest_report.json").exists()
+    assert (tmp_path / "reports" / "threshold_sweep_report.csv").exists()
     assert (tmp_path / "outputs" / "test_predictions.csv").exists()
 
     metrics = json.loads(
         (tmp_path / "reports" / "training_metrics.json").read_text(encoding="utf-8")
     )
-    assert metrics["validation"]["threshold_metrics"]
+    metadata = json.loads(
+        (tmp_path / "models" / "model_metadata.json").read_text(encoding="utf-8")
+    )
+    predictions = pd.read_csv(tmp_path / "outputs" / "test_predictions.csv")
+
+    assert metrics["validation"]["probability_metrics"]["brier_score"] >= 0
+    assert metrics["validation"]["probability_metrics"]["calibration_buckets"]
+    assert metrics["test"]["probability_metrics"]["top_5pct_hit_rate"] is not None
+    assert metrics["test"]["regression"]["pearson_corr"] is not None
+    assert metadata["model_version"] == "lightgbm_dual_v1"
+    assert metadata["symbol"] == "BTCUSDT"
+    assert metadata["horizon_bars"] == 6
+    assert metadata["signal_thresholds"]["buy_probability"] == 0.62
+    assert metadata["feature_count"] == len(
+        json.loads((tmp_path / "models" / "feature_columns.json").read_text())
+    )
+    assert {
+        "open_time",
+        "close",
+        "future_max_return_30m",
+        "y_buy",
+        "buy_probability",
+        "predicted_max_return",
+        "signal",
+        "reason",
+        "future_max_return_30m_from_next_open",
+        "future_min_return_30m_from_next_open",
+        "future_close_return_30m_from_next_open",
+    }.issubset(predictions.columns)
     assert metrics["test"]["backtest"]["model"]["round_trip_cost"] == pytest.approx(0.0024)
