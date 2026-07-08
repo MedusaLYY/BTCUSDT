@@ -3,6 +3,7 @@ import {
   mockEquityCurve,
   mockKlines,
   mockLatestSignal,
+  mockLiveMetrics,
   mockPrecisionThreshold,
   mockSignalDistribution,
   mockSignalRecords,
@@ -12,6 +13,7 @@ import type {
   BacktestSummary,
   EquityPoint,
   Kline,
+  LiveMetrics,
   PrecisionThresholdPoint,
   PredictionSignal,
   SignalDistributionPoint,
@@ -80,6 +82,18 @@ export function getLatestSignal() {
 
 export function getSignals() {
   return withMockFallback<SignalRecord[]>('/api/signals', mockSignalRecords);
+}
+
+export function getLivePredictions(limit = 30) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  return withMockFallback<SignalRecord[]>(
+    `/api/live/predictions?${query.toString()}`,
+    mockSignalRecords.slice(-limit),
+  );
+}
+
+export function getLiveMetrics() {
+  return withMockFallback<LiveMetrics>('/api/live/metrics', mockLiveMetrics);
 }
 
 export function getBacktestSummary() {

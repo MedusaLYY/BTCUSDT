@@ -9,6 +9,7 @@ import pandas as pd
 
 from data.fetch_binance_klines import fetch_binance_spot_raw_klines
 from features.build_features import build_feature_frame
+from live.settle_live_predictions import append_live_prediction_record
 from models.predict import predict_from_features
 from signals.signal_engine import assign_signals
 
@@ -44,6 +45,20 @@ def build_latest_prediction_signal(
     signaled = assign_signals(predicted.tail(1), **_signal_thresholds())
     row = signaled.iloc[-1]
     reason = [item.strip() for item in str(row["reason"]).split(";") if item.strip()]
+    append_live_prediction_record(
+        {
+            "symbol": symbol.upper(),
+            "interval": interval,
+            "open_time": row["open_time"],
+            "close": float(row["close"]),
+            "current_price": float(row["close"]),
+            "buy_probability": float(row["buy_probability"]),
+            "predicted_max_return": float(row["predicted_max_return"]),
+            "pred_high_price": float(row["pred_high_price"]),
+            "signal": str(row["signal"]),
+            "reason": "; ".join(reason),
+        }
+    )
 
     return {
         "symbol": symbol.upper(),

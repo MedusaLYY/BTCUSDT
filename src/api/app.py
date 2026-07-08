@@ -15,6 +15,10 @@ from api.realtime_signal import (
     load_precision_threshold,
     load_signal_distribution,
 )
+from live.settle_live_predictions import (
+    load_live_metrics,
+    load_live_prediction_records,
+)
 
 
 app = FastAPI(title="BTCUSDT Short-Term Prediction API")
@@ -24,6 +28,8 @@ app.add_middleware(
     allow_origins=[
         "http://127.0.0.1:5173",
         "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
     ],
     allow_credentials=False,
     allow_methods=["GET"],
@@ -73,6 +79,18 @@ def get_latest_signal() -> dict[str, object]:
 @app.get("/api/signals")
 def get_signals() -> list[dict[str, object]]:
     return load_historical_signal_records()
+
+
+@app.get("/api/live/metrics")
+def get_live_metrics() -> dict[str, object]:
+    return load_live_metrics()
+
+
+@app.get("/api/live/predictions")
+def get_live_predictions(
+    limit: int = Query(default=30, ge=1, le=500),
+) -> list[dict[str, object]]:
+    return load_live_prediction_records(limit=limit)
 
 
 @app.get("/api/backtest/summary")

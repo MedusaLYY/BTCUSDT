@@ -2,6 +2,7 @@ import type {
   BacktestSummary,
   EquityPoint,
   Kline,
+  LiveMetrics,
   PrecisionThresholdPoint,
   PredictionSignal,
   SignalDistributionPoint,
@@ -127,8 +128,38 @@ export const mockSignalRecords: SignalRecord[] = mockKlines
       predHighPrice: round(kline.close * (1 + predReturn), 1),
       actualFutureMaxReturn: actualFutureMaxReturn === undefined ? undefined : round(actualFutureMaxReturn, 4),
       hitStatus,
+      settlement_status: isPending ? 'PENDING' : 'SETTLED',
+      actual_future_max_return_30m: actualFutureMaxReturn === undefined ? null : round(actualFutureMaxReturn, 4),
+      actual_y_buy: actualFutureMaxReturn === undefined ? null : actualFutureMaxReturn > 0.002,
+      classification_hit: actualFutureMaxReturn === undefined ? null : signal !== 'NO_BUY' === actualFutureMaxReturn > 0.002,
+      signal_hit:
+        actualFutureMaxReturn === undefined
+          ? null
+          : signal === 'BUY'
+            ? actualFutureMaxReturn >= 0.0025
+            : signal === 'WATCH'
+              ? actualFutureMaxReturn >= 0.0015
+              : actualFutureMaxReturn < 0.002,
+      return_abs_error: actualFutureMaxReturn === undefined ? null : Math.abs(predReturn - actualFutureMaxReturn),
     };
   });
+
+export const mockLiveMetrics: LiveMetrics = {
+  settled_count: mockSignalRecords.filter((item) => item.settlement_status === 'SETTLED').length,
+  pending_count: mockSignalRecords.filter((item) => item.settlement_status === 'PENDING').length,
+  classification_hit_rate: 0.62,
+  signal_hit_rate: 0.58,
+  buy_signal_hit_rate: 0.64,
+  watch_signal_hit_rate: 0.53,
+  no_buy_correct_rate: 0.71,
+  mean_return_error: -0.0002,
+  mean_abs_return_error: 0.0011,
+  last_30_signal_hit_rate: 0.57,
+  last_100_signal_hit_rate: 0.58,
+  last_500_signal_hit_rate: 0.58,
+  last_7d_signal_hit_rate: 0.6,
+  last_30d_signal_hit_rate: 0.58,
+};
 
 const latestKline = mockKlines[mockKlines.length - 1];
 const latestProbability = 0.58;
