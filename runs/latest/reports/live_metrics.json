@@ -1,0 +1,16 @@
+{
+  "settled_count": 34,
+  "pending_count": 2,
+  "classification_hit_rate": 0.4117647058823529,
+  "signal_hit_rate": 0.47058823529411764,
+  "buy_signal_hit_rate": 0.1111111111111111,
+  "watch_signal_hit_rate": 1.0,
+  "no_buy_correct_rate": 0.5238095238095238,
+  "mean_return_error": 0.00038072520088457064,
+  "mean_abs_return_error": 0.001324309939433441,
+  "last_30_signal_hit_rate": 0.4,
+  "last_100_signal_hit_rate": 0.47058823529411764,
+  "last_500_signal_hit_rate": 0.47058823529411764,
+  "last_7d_signal_hit_rate": 0.47058823529411764,
+  "last_30d_signal_hit_rate": 0.47058823529411764
+}
